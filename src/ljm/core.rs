@@ -352,6 +352,55 @@ impl LJMLibrary {
         LJMLibrary::error_code(vtr, error_code)
     }
 
+    /// Reads multiple values from a labjack given the handle and an array of names to read.
+    /// Returns a Vec<f64> of values corresponding to each name.
+    #[doc(alias = "LJM_eReadNames")]
+    pub fn read_names<T: Into<Vec<u8>>>(
+        handle: i32,
+        names_to_read: Vec<T>,
+    ) -> Result<Vec<f64>, LJMError> {
+        #[cfg(feature = "dynlink")]
+        let d_read_names: Symbol<
+        extern "C" fn(i32, i32, *mut *const c_char, *mut c_double, *mut i32) -> i32,
+        > = unsafe { LJMLibrary::get_c_function(b"LJM_eReadNames")? };
+
+        let num_frames = names_to_read.len() as i32;
+
+        // Convert each name into a CString, keeping them alive for the duration of the call
+        let c_strings: Vec<CString> = names_to_read
+            .into_iter()
+            .map(|n| CString::new(n).map_err(|_| LJMError::CStringConversionFailed))
+            .collect::<Result<Vec<CString>, LJMError>>()?;
+
+        // Build a vec of raw pointers into those CStrings
+        let mut c_ptrs: Vec<*const c_char> = c_strings.iter().map(|s| s.as_ptr()).collect();
+
+        // Allocate output buffer
+        let mut values: Vec<c_double> = vec![c_double::from(-1.0); num_frames as usize];
+        let mut error_addr: i32 = 0;
+
+        #[cfg(feature = "dynlink")]
+        let error_code = d_read_names(
+            handle,
+            num_frames,
+            c_ptrs.as_mut_ptr(),
+            values.as_mut_ptr(),
+            &mut error_addr,
+        );
+        #[cfg(feature = "staticlink")]
+        let error_code = unsafe {
+            lib::LJM_eReadNames(
+                handle,
+                num_frames,
+                c_ptrs.as_mut_ptr(),
+                values.as_mut_ptr(),
+                &mut error_addr,
+            )
+        };
+
+        LJMLibrary::error_code(values, error_code)
+    }
+
     /// Opens a LabJack and returns the handle id as an i32.
     #[doc(alias = "LJM_OpenS")]
     pub fn open_jack<T: Into<Vec<u8>>>(
